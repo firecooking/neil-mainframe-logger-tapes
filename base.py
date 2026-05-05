@@ -7,7 +7,7 @@ import datetime
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Entry Tracker")
+        self.title("System Log - by firecooking")
         self.geometry("1000x800")
 
         # Alters frame
@@ -33,6 +33,7 @@ class App(tk.Tk):
         # Frame for inputs
         frame = tk.Frame(self)
         frame.pack(pady=10)
+        self.editing_item = None
 
         tk.Label(frame, text="Name:").grid(row=0, column=0)
         self.name_entry = tk.Entry(frame)
@@ -57,11 +58,17 @@ class App(tk.Tk):
         remove_button = tk.Button(frame, text="Remove Selected", command=self.remove_entry)
         remove_button.grid(row=4, column=1, pady=10)
 
+        edit_button = tk.Button(frame, text="Load Selected", command=self.load_selected)
+        edit_button.grid(row=4, column=2, pady=10)
+
         save_button = tk.Button(frame, text="Save Entries", command=self.save_entries)
         save_button.grid(row=5, column=0, pady=10)
 
         load_button = tk.Button(frame, text="Load Entries", command=self.load_entries)
         load_button.grid(row=5, column=1, pady=10)
+
+        update_button = tk.Button(frame, text="Update Entry", command=self.update_entry)
+        update_button.grid(row=5, column=2, pady=10)
 
         add_front_button = tk.Button(frame, text="Add to Front", command=self.add_to_front)
         add_front_button.grid(row=6, column=0, pady=10)
@@ -89,6 +96,41 @@ class App(tk.Tk):
             self.tree.delete(selected)
         else:
             messagebox.showwarning("Warning", "No entry selected")
+
+    def load_selected(self):
+        selected = self.tree.selection()
+        if selected:
+            item = selected[0]
+            values = self.tree.item(item, "values")
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, values[0])
+            self.birthday_entry.delete(0, tk.END)
+            self.birthday_entry.insert(0, values[1])
+            self.pronouns_entry.delete(0, tk.END)
+            self.pronouns_entry.insert(0, values[2])
+            self.bio_entry.delete(0, tk.END)
+            self.bio_entry.insert(0, values[3])
+            self.editing_item = item
+        else:
+            messagebox.showwarning("Warning", "No alter selected")
+
+    def update_entry(self):
+        if self.editing_item:
+            name = self.name_entry.get()
+            birthday = self.birthday_entry.get()
+            pronouns = self.pronouns_entry.get()
+            bio = self.bio_entry.get()
+            if name:
+                self.tree.item(self.editing_item, values=(name, birthday, pronouns, bio))
+                self.name_entry.delete(0, tk.END)
+                self.birthday_entry.delete(0, tk.END)
+                self.pronouns_entry.delete(0, tk.END)
+                self.bio_entry.delete(0, tk.END)
+                self.editing_item = None
+            else:
+                messagebox.showerror("Error", "Name is required")
+        else:
+            messagebox.showwarning("Warning", "No alter loaded for editing")
 
     def add_to_front(self):
         selected = self.tree.selection()
