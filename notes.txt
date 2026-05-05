@@ -1,8 +1,8 @@
 Create a tracker for PLURAL SYSTEMS who need to accomplish the following
-    ( ) Keep track of head mates
-    ( ) Log who is fronting
-    ( ) Not require access to servers
-    ( ) Log basic information for each 'alter'
+    (x) Keep track of head mates
+    (x) Log who is fronting
+    (x) Not require access to servers
+    (x) Log basic information for each 'alter'
     ( ) Be easily maintained
-    ( ) Have interface
-    ( ) Support transfers between devices
+    (x) Have interface
+    (x) Support transfers between devices
