@@ -70,14 +70,14 @@ class App(tk.Tk):
         edit_button = tk.Button(frame, text="Load Selected", command=self.load_selected)
         edit_button.grid(row=4, column=2, pady=10)
 
-        update_button = tk.Button(frame, text="Update Entry", command=self.update_entry)
-        update_button.grid(row=5, column=2, pady=10)
-
         add_front_button = tk.Button(frame, text="Add to Front", command=self.add_to_front)
         add_front_button.grid(row=6, column=0, pady=10)
 
         remove_front_button = tk.Button(frame, text="Remove from Front", command=self.remove_from_front)
         remove_front_button.grid(row=6, column=1, pady=10)
+
+        update_button = tk.Button(frame, text="Update Entry", command=self.update_entry)
+        update_button.grid(row=6, column=2, pady=10)
 
         self.configure_widget_colors(self)
         self.update_treeview_style()
@@ -99,7 +99,7 @@ class App(tk.Tk):
         menu_bar.add_cascade(label="Settings", menu=settings_menu)
 
         help_menu = tk.Menu(menu_bar, tearoff=0)
-        help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", "System Log by firecooking"))
+        help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", "System Log by firecooking, buy me a coffee at https://ko-fi.com/firecooking"))
         menu_bar.add_cascade(label="Help", menu=help_menu)
 
     def create_toolbar(self):
