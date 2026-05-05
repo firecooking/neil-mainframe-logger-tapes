@@ -71,13 +71,13 @@ class App(tk.Tk):
         edit_button.grid(row=4, column=2, pady=10)
 
         add_front_button = tk.Button(frame, text="Add to Front", command=self.add_to_front)
-        add_front_button.grid(row=6, column=0, pady=10)
+        add_front_button.grid(row=5, column=0, pady=10)
 
         remove_front_button = tk.Button(frame, text="Remove from Front", command=self.remove_from_front)
-        remove_front_button.grid(row=6, column=1, pady=10)
+        remove_front_button.grid(row=5, column=1, pady=10)
 
         update_button = tk.Button(frame, text="Update Entry", command=self.update_entry)
-        update_button.grid(row=6, column=2, pady=10)
+        update_button.grid(row=5, column=2, pady=10)
 
         self.configure_widget_colors(self)
         self.update_treeview_style()
@@ -112,8 +112,7 @@ class App(tk.Tk):
             ("Load Selected", self.load_selected),
             ("Update Entry", self.update_entry),
             ("Add to Front", self.add_to_front),
-            ("Remove from Front", self.remove_from_front),
-            ("Colors", self.choose_colors),
+            ("Remove from Front", self.remove_from_front)
         ]
 
         for text, command in toolbar_buttons:
