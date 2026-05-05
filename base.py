@@ -1,5 +1,6 @@
+import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import tkinter.messagebox as messagebox
 
 class App(tk.Tk):
@@ -43,6 +44,12 @@ class App(tk.Tk):
         remove_button = tk.Button(frame, text="Remove Selected", command=self.remove_entry)
         remove_button.grid(row=4, column=1, pady=10)
 
+        save_button = tk.Button(frame, text="Save Entries", command=self.save_entries)
+        save_button.grid(row=5, column=0, pady=10)
+
+        load_button = tk.Button(frame, text="Load Entries", command=self.load_entries)
+        load_button.grid(row=5, column=1, pady=10)
+
     def add_entry(self):
         name = self.name_entry.get()
         birthday = self.birthday_entry.get()
@@ -63,6 +70,60 @@ class App(tk.Tk):
             self.tree.delete(selected)
         else:
             messagebox.showwarning("Warning", "No entry selected")
+
+    def save_entries(self):
+        entries = []
+        for item in self.tree.get_children():
+            values = self.tree.item(item, "values")
+            entries.append({
+                "Name": values[0],
+                "Birthday": values[1],
+                "Pronouns": values[2],
+                "Bio": values[3],
+            })
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Save Entries",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as file:
+                json.dump(entries, file, indent=2, ensure_ascii=False)
+            messagebox.showinfo("Saved", f"Entries saved to {file_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save entries:\n{e}")
+
+    def load_entries(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Load Entries",
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                entries = json.load(file)
+
+            self.tree.delete(*self.tree.get_children())
+            for entry in entries:
+                self.tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        entry.get("Name", ""),
+                        entry.get("Birthday", ""),
+                        entry.get("Pronouns", ""),
+                        entry.get("Bio", ""),
+                    ),
+                )
+            messagebox.showinfo("Loaded", f"Loaded {len(entries)} entries from {file_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load entries:\n{e}")
 
 if __name__ == "__main__":
     app = App()
