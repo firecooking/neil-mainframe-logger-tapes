@@ -3,6 +3,6 @@ Create a tracker for PLURAL SYSTEMS who need to accomplish the following
     (x) Log who is fronting
     (x) Not require access to servers
     (x) Log basic information for each 'alter'
-    (x) Be easily maintained
+    ( ) Be easily maintained
     (x) Have interface
     (x) Support transfers between devices
