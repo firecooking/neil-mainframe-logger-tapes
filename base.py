@@ -18,7 +18,6 @@ class App(tk.Tk):
         self.style.theme_use("default")
 
         self.load_settings()
-        self.load_entries_auto()
 
         self.create_menu_bar()
         self.create_toolbar()
@@ -42,6 +41,8 @@ class App(tk.Tk):
         self.front_tree.heading("Alter Name", text="Alter Name")
         self.front_tree.heading("Timestamp", text="Timestamp")
         self.front_tree.pack(fill=tk.BOTH, expand=True)
+
+        self.load_entries_auto()
 
         # Frame for inputs
         frame = tk.Frame(self)
