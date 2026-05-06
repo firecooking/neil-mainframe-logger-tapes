@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, colorchooser
 import tkinter.messagebox as messagebox
 import datetime
+import os
 
 class App(tk.Tk):
     def __init__(self):
@@ -15,6 +16,9 @@ class App(tk.Tk):
         self.entry_bg_color = "#ffffff"
         self.style = ttk.Style(self)
         self.style.theme_use("default")
+
+        self.load_settings()
+        self.load_entries_auto()
 
         self.create_menu_bar()
         self.create_toolbar()
@@ -81,6 +85,94 @@ class App(tk.Tk):
 
         self.configure_widget_colors(self)
         self.update_treeview_style()
+
+    def load_settings(self):
+        settings_file = "settings.json"
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                self.bg_color = settings.get("bg_color", self.bg_color)
+                self.fg_color = settings.get("fg_color", self.fg_color)
+                self.entry_bg_color = settings.get("entry_bg_color", self.entry_bg_color)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load settings:\n{e}")
+
+    def save_settings(self):
+        settings_file = "settings.json"
+        settings = {
+            "bg_color": self.bg_color,
+            "fg_color": self.fg_color,
+            "entry_bg_color": self.entry_bg_color
+        }
+        try:
+            with open(settings_file, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings:\n{e}")
+
+    def load_entries_auto(self):
+        data_file = "data.json"
+        if os.path.exists(data_file):
+            try:
+                with open(data_file, "r", encoding="utf-8") as file:
+                    data = json.load(file)
+
+                alters = data.get("alters", [])
+                front = data.get("front", [])
+
+                self.tree.delete(*self.tree.get_children())
+                for entry in alters:
+                    self.tree.insert(
+                        "",
+                        tk.END,
+                        values=(
+                            entry.get("Name", ""),
+                            entry.get("Birthday", ""),
+                            entry.get("Pronouns", ""),
+                            entry.get("Bio", ""),
+                        ),
+                    )
+
+                self.front_tree.delete(*self.front_tree.get_children())
+                for entry in front:
+                    self.front_tree.insert(
+                        "",
+                        tk.END,
+                        values=(
+                            entry.get("Alter Name", ""),
+                            entry.get("Timestamp", ""),
+                        ),
+                    )
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load data:\n{e}")
+
+    def save_entries_auto(self):
+        alters = []
+        for item in self.tree.get_children():
+            values = self.tree.item(item, "values")
+            alters.append({
+                "Name": values[0],
+                "Birthday": values[1],
+                "Pronouns": values[2],
+                "Bio": values[3],
+            })
+
+        front = []
+        for item in self.front_tree.get_children():
+            values = self.front_tree.item(item, "values")
+            front.append({
+                "Alter Name": values[0],
+                "Timestamp": values[1],
+            })
+
+        data = {"alters": alters, "front": front}
+
+        try:
+            with open("data.json", "w", encoding="utf-8") as file:
+                json.dump(data, file, indent=2, ensure_ascii=False)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save data:\n{e}")
 
     def create_menu_bar(self):
         menu_bar = tk.Menu(self)
@@ -162,6 +254,7 @@ class App(tk.Tk):
         self.entry_bg_color = entry_choice[1]
         self.configure_widget_colors(self)
         self.update_treeview_style()
+        self.save_settings()
 
     def reset_colors(self):
         self.bg_color = "#CACACA"
@@ -169,6 +262,7 @@ class App(tk.Tk):
         self.entry_bg_color = "#ffffff"
         self.configure_widget_colors(self)
         self.update_treeview_style()
+        self.save_settings()
 
     def add_entry(self):
         name = self.name_entry.get()
@@ -181,6 +275,7 @@ class App(tk.Tk):
             self.birthday_entry.delete(0, tk.END)
             self.pronouns_entry.delete(0, tk.END)
             self.bio_entry.delete(0, tk.END)
+            self.save_entries_auto()
         else:
             messagebox.showerror("Error", "Name is required")
 
@@ -188,6 +283,7 @@ class App(tk.Tk):
         selected = self.tree.selection()
         if selected:
             self.tree.delete(selected)
+            self.save_entries_auto()
         else:
             messagebox.showwarning("Warning", "No entry selected")
 
@@ -221,6 +317,7 @@ class App(tk.Tk):
                 self.pronouns_entry.delete(0, tk.END)
                 self.bio_entry.delete(0, tk.END)
                 self.editing_item = None
+                self.save_entries_auto()
             else:
                 messagebox.showerror("Error", "Name is required")
         else:
@@ -235,6 +332,7 @@ class App(tk.Tk):
             if alter_name:
                 timestamp = datetime.datetime.now().isoformat()
                 self.front_tree.insert("", tk.END, values=(alter_name, timestamp))
+                self.save_entries_auto()
             else:
                 messagebox.showwarning("Warning", "Selected alter has no name")
         else:
@@ -244,6 +342,7 @@ class App(tk.Tk):
         selected = self.front_tree.selection()
         if selected:
             self.front_tree.delete(selected)
+            self.save_entries_auto()
         else:
             messagebox.showwarning("Warning", "No front entry selected")
 
