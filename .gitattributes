@@ -7,3 +7,5 @@
 *.json filter=lfs diff=lfs merge=lfs -text
 *.ico filter=lfs diff=lfs merge=lfs -text
 *.txt filter=lfs diff=lfs merge=lfs -text
+*.kts filter=lfs diff=lfs merge=lfs -text
+*.kt filter=lfs diff=lfs merge=lfs -text
