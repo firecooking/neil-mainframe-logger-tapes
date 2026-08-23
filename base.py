@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-version https://git-lfs.github.com/spec/v1
-oid sha256:ed3fefc10128551b63e230aaba25cd60df18de9b9d78213c516aeb69dbeb7404
-size 34185
-=======
 import json
 import tkinter as tk
 from tkinter import ttk, filedialog, colorchooser, simpledialog
@@ -10,12 +5,14 @@ import tkinter.messagebox as messagebox
 import datetime
 import os
 import sys
+import copy
+import textwrap
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("System Logger - by firecooking")
-        self.geometry("1000x800")
+        self.window_geometry = "1000x800"
         
         # Set window icon and taskbar icon
         try:
@@ -33,15 +30,27 @@ class App(tk.Tk):
         # default alter columns
         self.alter_columns = ["Name", "Birthday", "Pronouns", "Bio"]
         self.front_collapsed = False
+        self.front_sort_order = "oldest"
+        self.word_wrap_enabled = False
+        self.wrap_update_after_id = None
+        self.dragged_alter_item = None
+        self.history = []
+        self.redo_history = []
+        self.restoring_history = False
         # input widths (pixels) and focus
         self.input_widths = {}
         self.input_widths_by_index = []
         self.last_focused_col = None
 
         self.load_settings()
+        self.geometry(self.window_geometry)
+        self.front_sort_variable = tk.StringVar(self, value=self.front_sort_order)
+        self.word_wrap_variable = tk.BooleanVar(self, value=self.word_wrap_enabled)
 
         self.create_menu_bar()
         self.create_toolbar()
+        self.bind_all("<Control-z>", self.handle_global_undo)
+        self.bind_all("<Control-y>", self.handle_global_redo)
 
         # Alters frame with editable headings
         self.alters_frame = tk.Frame(self)
@@ -68,11 +77,15 @@ class App(tk.Tk):
         self.front_tree.heading("Alter Name", text="Alter Name")
         self.front_tree.heading("Timestamp", text="Timestamp")
         self.front_tree.pack(fill=tk.BOTH, expand=True)
+        self.front_tree.bind("<Configure>", self.schedule_word_wrap_update)
+        self.front_tree.bind("<Double-1>", self.on_front_double_click)
+        self.create_context_menus()
 
         self.load_entries_auto()
 
         self.configure_widget_colors(self)
         self.update_treeview_style()
+        self.history = [self.get_current_data()]
 
         # restore front collapsed state
         if self.front_collapsed:
@@ -90,6 +103,11 @@ class App(tk.Tk):
                 # load saved alter column configuration and front collapsed state
                 self.alter_columns = settings.get("alter_columns", self.alter_columns)
                 self.front_collapsed = settings.get("front_collapsed", self.front_collapsed)
+                self.front_sort_order = settings.get("front_sort_order", self.front_sort_order)
+                if self.front_sort_order not in ("oldest", "newest"):
+                    self.front_sort_order = "oldest"
+                self.word_wrap_enabled = settings.get("word_wrap_enabled", self.word_wrap_enabled)
+                self.window_geometry = settings.get("window_geometry", self.window_geometry)
                 self.input_widths = settings.get("input_widths", self.input_widths)
                 self.input_widths_by_index = settings.get("input_widths_by_index", self.input_widths_by_index)
                 self.last_focused_col = settings.get("last_focused_col", self.last_focused_col)
@@ -104,6 +122,9 @@ class App(tk.Tk):
             "entry_bg_color": self.entry_bg_color,
             "alter_columns": self.alter_columns,
             "front_collapsed": self.front_collapsed,
+            "front_sort_order": self.front_sort_order,
+            "word_wrap_enabled": self.word_wrap_enabled,
+            "window_geometry": self.geometry(),
             "input_widths": self.input_widths,
             "input_widths_by_index": self.input_widths_by_index,
             "last_focused_col": self.last_focused_col,
@@ -127,19 +148,8 @@ class App(tk.Tk):
             try:
                 with open(data_file, "r", encoding="utf-8") as file:
                     data = json.load(file)
-
                 normalized = self.normalize_loaded_json(data)
-                self.alter_columns = normalized["alter_columns"]
-                self.build_alters_tree(self.alter_columns)
-
-                self.tree.delete(*self.tree.get_children())
-                for entry in normalized["alters"]:
-                    values = [entry.get(col, "") for col in self.alter_columns]
-                    self.tree.insert("", tk.END, values=tuple(values))
-
-                self.front_tree.delete(*self.front_tree.get_children())
-                for entry in normalized["front"]:
-                    self.front_tree.insert("", tk.END, values=(entry.get("Alter Name", ""), entry.get("Timestamp", "")))
+                self.apply_normalized_data(normalized)
 
                 # save normalized data back to data.json if it was legacy
                 if not (isinstance(data, dict) and "alter_columns" in data and "alters" in data and "front" in data):
@@ -148,30 +158,85 @@ class App(tk.Tk):
                 messagebox.showerror("Error", f"Failed to load data:\n{e}")
 
     def save_entries_auto(self):
+        self.sort_front_tree()
+        self.apply_word_wrap()
+        if self.save_data_to_file("data.json", "save data") and not self.restoring_history:
+            self.record_history()
+
+    def record_history(self):
+        state = copy.deepcopy(self.get_current_data())
+        if not self.history or state != self.history[-1]:
+            self.history.append(state)
+            self.redo_history.clear()
+
+    def undo(self):
+        if len(self.history) < 2:
+            return
+        self.redo_history.append(self.history.pop())
+        self.restore_history(self.history[-1])
+
+    def redo(self):
+        if not self.redo_history:
+            return
+        state = self.redo_history.pop()
+        self.history.append(state)
+        self.restore_history(state)
+
+    def handle_global_undo(self, event):
+        if isinstance(self.focus_get(), (tk.Entry, tk.Text)):
+            return
+        self.undo()
+        return "break"
+
+    def handle_global_redo(self, event):
+        if isinstance(self.focus_get(), (tk.Entry, tk.Text)):
+            return
+        self.redo()
+        return "break"
+
+    def restore_history(self, state):
+        self.restoring_history = True
+        try:
+            self.apply_normalized_data(copy.deepcopy(state))
+            self.save_data_to_file("data.json", "save data")
+        finally:
+            self.restoring_history = False
+
+    def get_current_data(self):
         alters = []
         for item in self.tree.get_children():
             values = self.tree.item(item, "values")
-            # map values to column names
-            entry = {}
-            for i, col in enumerate(self.alter_columns):
-                entry[col] = values[i] if i < len(values) else ""
-            alters.append(entry)
+            alters.append({col: self.unwrap_value(values[i]) if i < len(values) else "" for i, col in enumerate(self.alter_columns)})
 
         front = []
         for item in self.front_tree.get_children():
             values = self.front_tree.item(item, "values")
-            front.append({
-                "Alter Name": values[0],
-                "Timestamp": values[1],
-            })
+            front.append({"Alter Name": self.unwrap_value(values[0]), "Timestamp": self.unwrap_value(values[1])})
 
-        data = {"alters": alters, "front": front, "alter_columns": self.alter_columns}
+        return {"alters": alters, "front": front, "alter_columns": self.alter_columns}
 
+    def save_data_to_file(self, file_path, description):
         try:
-            with open("data.json", "w", encoding="utf-8") as file:
-                json.dump(data, file, indent=2, ensure_ascii=False)
+            with open(file_path, "w", encoding="utf-8") as file:
+                json.dump(self.get_current_data(), file, indent=2, ensure_ascii=False)
+            return True
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save data:\n{e}")
+            messagebox.showerror("Error", f"Failed to {description}:\n{e}")
+            return False
+
+    def apply_normalized_data(self, normalized):
+        self.alter_columns = normalized["alter_columns"]
+        self.build_alters_tree(self.alter_columns)
+        self.tree.delete(*self.tree.get_children())
+        for entry in normalized["alters"]:
+            values = [entry.get(col, "") for col in self.alter_columns]
+            self.tree.insert("", tk.END, values=tuple(values))
+
+        self.front_tree.delete(*self.front_tree.get_children())
+        for entry in normalized["front"]:
+            self.front_tree.insert("", tk.END, values=(entry.get("Alter Name", ""), entry.get("Timestamp", "")))
+        self.sort_front_tree()
+        self.apply_word_wrap()
 
     def normalize_loaded_json(self, data):
         """Normalize loaded JSON into current schema: alters, front, alter_columns."""
@@ -263,6 +328,11 @@ class App(tk.Tk):
         file_menu.add_command(label="Exit", command=self.quit)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
+        edit_menu = tk.Menu(menu_bar, tearoff=0)
+        edit_menu.add_command(label="Undo", command=self.undo, accelerator="Ctrl+Z")
+        edit_menu.add_command(label="Redo", command=self.redo, accelerator="Ctrl+Y")
+        menu_bar.add_cascade(label="Edit", menu=edit_menu)
+
         settings_menu = tk.Menu(menu_bar, tearoff=0)
         settings_menu.add_command(label="Set Interface Colors...", command=self.choose_colors)
         settings_menu.add_command(label="Reset Colors", command=self.reset_colors)
@@ -272,11 +342,19 @@ class App(tk.Tk):
 
         view_menu = tk.Menu(menu_bar, tearoff=0)
         view_menu.add_command(label="Toggle Front Panel", command=self.toggle_front)
+        view_menu.add_separator()
+        view_menu.add_radiobutton(label="Front: Oldest First", variable=self.front_sort_variable, value="oldest", command=lambda: self.set_front_sort_order("oldest"))
+        view_menu.add_radiobutton(label="Front: Newest First", variable=self.front_sort_variable, value="newest", command=lambda: self.set_front_sort_order("newest"))
+        view_menu.add_checkbutton(label="Wrap Display Text", command=self.toggle_word_wrap, variable=self.word_wrap_variable)
         menu_bar.add_cascade(label="View", menu=view_menu)
 
         help_menu = tk.Menu(menu_bar, tearoff=0)
+        help_menu.add_command(label="Keyboard Shortcuts", command=self.open_shortcuts_popup)
+        help_menu.add_separator()
         help_menu.add_command(label="About", command=lambda: messagebox.showinfo("About", "System Log by firecooking, buy me a coffee at https://ko-fi.com/firecooking"))
         menu_bar.add_cascade(label="Help", menu=help_menu)
+        self.menu_bar = menu_bar
+        self.menus = (file_menu, edit_menu, settings_menu, view_menu, help_menu)
 
     def create_toolbar(self):
         self.toolbar = tk.Frame(self, bd=2, relief=tk.RAISED)
@@ -284,9 +362,45 @@ class App(tk.Tk):
 
         tk.Button(self.toolbar, text="Edit Selected", command=self.open_edit_entry_popup).pack(side=tk.LEFT, padx=4, pady=4)
         tk.Button(self.toolbar, text="Toggle Front", command=self.toggle_front).pack(side=tk.LEFT, padx=4, pady=4)
+        tk.Button(self.toolbar, text="Undo", command=self.undo).pack(side=tk.LEFT, padx=4, pady=4)
+        tk.Button(self.toolbar, text="Redo", command=self.redo).pack(side=tk.LEFT, padx=4, pady=4)
+
+    def open_shortcuts_popup(self):
+        popup = tk.Toplevel(self)
+        popup.title("Keyboard Shortcuts")
+        popup.geometry("520x390")
+        popup.transient(self)
+
+        shortcuts = (
+            ("Ctrl+C", "Copy the selected row."),
+            ("Ctrl+V", "Paste the previously copied row."),
+            ("Ctrl+D", "Duplicate the selected row."),
+            ("Ctrl+Z", "Undo the last change."),
+            ("Ctrl+Y", "Redo what was undone."),
+            ("Ctrl+W", "Turn word wrapping on or off in both displays."),
+            ("Enter or Tab in an input", "Move to the next input, or add the entry from the last input."),
+            ("Double-click a Front row", "Edit the Front entry."),
+            ("Double-click a Alter row", "Edit the Alter entry."),
+            ("Double-click an Alter heading", "Rename the heading."),
+            ("Right-click a row", "Open actions for that row."),
+            ("Drag an Alter row", "Move it to a different position."),
+        )
+
+        tk.Label(popup, text="Shortcuts", font=("TkDefaultFont", 11, "bold")).pack(anchor=tk.W, padx=14, pady=(14, 8))
+        list_frame = tk.Frame(popup)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=14)
+
+        for shortcut, description in shortcuts:
+            row = tk.Frame(list_frame)
+            row.pack(fill=tk.X, pady=3)
+            tk.Label(row, text=shortcut, width=24, anchor=tk.W).pack(side=tk.LEFT)
+            tk.Label(row, text=description, anchor=tk.W, justify=tk.LEFT, wraplength=340).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        tk.Button(popup, text="Close", command=popup.destroy).pack(pady=12)
+        self.configure_widget_colors(popup)
 
     def configure_widget_colors(self, widget):
-        if isinstance(widget, (tk.Frame, tk.LabelFrame)):
+        if isinstance(widget, (tk.Tk, tk.Frame, tk.LabelFrame, tk.Toplevel)):
             widget.configure(bg=self.bg_color)
         elif isinstance(widget, tk.Label):
             widget.configure(bg=self.bg_color, fg=self.fg_color)
@@ -295,8 +409,182 @@ class App(tk.Tk):
         elif isinstance(widget, tk.Entry):
             widget.configure(bg=self.entry_bg_color, fg=self.fg_color, insertbackground=self.fg_color)
 
+        if isinstance(widget, tk.Menu):
+            widget.configure(bg=self.bg_color, fg=self.fg_color, activebackground=self.entry_bg_color, activeforeground=self.fg_color)
+
         for child in widget.winfo_children():
             self.configure_widget_colors(child)
+
+        if widget is self:
+            for menu in getattr(self, "menus", ()) + tuple(
+                menu for menu in (getattr(self, "alter_context_menu", None), getattr(self, "front_context_menu", None)) if menu
+            ):
+                menu.configure(bg=self.bg_color, fg=self.fg_color, activebackground=self.entry_bg_color, activeforeground=self.fg_color)
+
+    def create_context_menus(self):
+        self.alter_context_menu = tk.Menu(self, tearoff=0)
+        self.alter_context_menu.add_command(label="Edit Selected", command=self.open_edit_entry_popup)
+        self.alter_context_menu.add_command(label="Load Selected", command=self.load_selected)
+        self.alter_context_menu.add_command(label="Add to Front", command=self.add_to_front)
+        self.alter_context_menu.add_command(label="Remove Selected", command=self.remove_entry)
+        self.alter_context_menu.add_command(label="Paste Entry", command=lambda: self.paste_tree_rows(self.tree))
+        self.alter_context_menu.add_command(label="Duplicate Entry", command=lambda: self.duplicate_tree_row(self.tree))
+        self.alter_context_menu.add_separator()
+        self.alter_context_menu.add_command(label="Copy Row", command=lambda: self.copy_tree_row(self.tree))
+
+        self.front_context_menu = tk.Menu(self, tearoff=0)
+        self.front_context_menu.add_command(label="Edit Selected", command=self.open_edit_front_popup)
+        self.front_context_menu.add_command(label="Remove from Front", command=self.remove_from_front)
+        self.front_context_menu.add_command(label="Paste Entry", command=lambda: self.paste_tree_rows(self.front_tree))
+        self.front_context_menu.add_command(label="Duplicate Entry", command=lambda: self.duplicate_tree_row(self.front_tree))
+        self.front_context_menu.add_separator()
+        self.front_context_menu.add_command(label="Copy Row", command=lambda: self.copy_tree_row(self.front_tree))
+
+        self.tree.bind("<Button-3>", lambda event: self.show_context_menu(event, self.tree, self.alter_context_menu))
+        self.front_tree.bind("<Button-3>", lambda event: self.show_context_menu(event, self.front_tree, self.front_context_menu))
+        self.bind_tree_shortcuts(self.tree)
+        self.bind_tree_shortcuts(self.front_tree)
+
+    def bind_tree_shortcuts(self, tree):
+        tree.bind("<Control-c>", lambda event: self.handle_tree_shortcut(event, tree, self.copy_tree_row))
+        tree.bind("<Control-v>", lambda event: self.handle_tree_shortcut(event, tree, self.paste_tree_rows))
+        tree.bind("<Control-d>", lambda event: self.handle_tree_shortcut(event, tree, self.duplicate_tree_row))
+        tree.bind("<Control-w>", lambda event: self.handle_tree_shortcut(event, tree, lambda _: self.toggle_word_wrap()))
+
+    def toggle_word_wrap(self):
+        self.word_wrap_enabled = not self.word_wrap_enabled
+        self.word_wrap_variable.set(self.word_wrap_enabled)
+        self.apply_word_wrap()
+        self.save_settings()
+
+    def unwrap_value(self, value):
+        return " ".join(str(value).splitlines())
+
+    def apply_word_wrap(self):
+        if not hasattr(self, "front_tree"):
+            return
+        trees = (self.tree, self.front_tree)
+        max_lines = 1
+        for tree in trees:
+            for item in tree.get_children():
+                values = list(tree.item(item, "values"))
+                display_values = []
+                for index, value in enumerate(values):
+                    raw_value = self.unwrap_value(value)
+                    if self.word_wrap_enabled:
+                        width = max(8, int(tree.column(tree["columns"][index], "width") / 8))
+                        wrapped = textwrap.fill(raw_value, width=width, break_long_words=True, break_on_hyphens=False)
+                        max_lines = max(max_lines, wrapped.count("\n") + 1)
+                        display_values.append(wrapped)
+                    else:
+                        display_values.append(raw_value)
+                tree.item(item, values=tuple(display_values))
+        self.style.configure("Custom.Treeview", rowheight=20 * max_lines if self.word_wrap_enabled else 20)
+
+    def schedule_word_wrap_update(self, event=None):
+        if not self.word_wrap_enabled or self.wrap_update_after_id is not None:
+            return
+        self.wrap_update_after_id = self.after(100, self.update_word_wrap)
+
+    def update_word_wrap(self):
+        self.wrap_update_after_id = None
+        self.apply_word_wrap()
+
+    def set_front_sort_order(self, order):
+        self.front_sort_order = order
+        self.front_sort_variable.set(order)
+        self.sort_front_tree()
+        self.save_settings()
+
+    def sort_front_tree(self):
+        rows = [(self.front_tree.item(item, "values"), item) for item in self.front_tree.get_children()]
+        rows.sort(key=lambda row: row[0][1] if len(row[0]) > 1 else "", reverse=self.front_sort_order == "newest")
+        for index, (_, item) in enumerate(rows):
+            self.front_tree.move(item, "", index)
+
+    def start_alter_drag(self, event):
+        self.dragged_alter_item = self.tree.identify_row(event.y)
+
+    def finish_alter_drag(self, event):
+        item = self.dragged_alter_item
+        self.dragged_alter_item = None
+        if not item or not self.tree.exists(item):
+            return
+        target = self.tree.identify_row(event.y)
+        if target == item:
+            return
+        target_index = self.tree.index(target) if target else "end"
+        if target or target_index == "end":
+            self.tree.move(item, "", target_index)
+            self.tree.selection_set(item)
+            self.tree.focus(item)
+            self.save_entries_auto()
+
+    def show_context_menu(self, event, tree, menu):
+        item = tree.identify_row(event.y)
+        if not item:
+            return
+        tree.selection_set(item)
+        tree.focus(item)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def copy_tree_row(self, tree):
+        selected = tree.selection()
+        if not selected:
+            return
+        values = tree.item(selected[0], "values")
+        self.clipboard_clear()
+        self.clipboard_append("\t".join(self.unwrap_value(value) for value in values))
+
+    def paste_tree_rows(self, tree):
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:
+            messagebox.showwarning("Paste", "The clipboard does not contain text")
+            return
+
+        rows = []
+        for line in text.splitlines():
+            values = line.split("\t")
+            if any(value.strip() for value in values):
+                rows.append(tuple(values[:len(tree["columns"])]))
+
+        if not rows:
+            messagebox.showwarning("Paste", "No entries found in the clipboard")
+            return
+
+        column_count = len(tree["columns"])
+        inserted = 0
+        for values in rows:
+            padded_values = values + ("",) * (column_count - len(values))
+            if not padded_values[0].strip():
+                continue
+            tree.insert("", tk.END, values=padded_values)
+            inserted += 1
+
+        if inserted:
+            self.save_entries_auto()
+        if inserted < len(rows):
+            messagebox.showwarning("Paste", "Entries without a name were skipped")
+
+    def duplicate_tree_row(self, tree):
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("Duplicate", "No entry selected")
+            return
+        item = selected[0]
+        copy = tree.insert("", tk.END, values=tree.item(item, "values"))
+        tree.selection_set(copy)
+        tree.focus(copy)
+        self.save_entries_auto()
+
+    def handle_tree_shortcut(self, event, tree, action):
+        action(tree)
+        return "break"
+
+    def on_front_double_click(self, event):
+        if self.front_tree.identify_region(event.x, event.y) == "cell":
+            self.open_edit_front_popup()
 
     def update_treeview_style(self):
         self.style.configure(
@@ -395,8 +683,14 @@ class App(tk.Tk):
             self.tree.heading(col, text=col)
             self.tree.column(col, width=150)
         self.tree.pack(fill=tk.BOTH, expand=True)
+        self.tree.bind("<Configure>", self.schedule_word_wrap_update)
         # bind double-clicks for header editing
         self.tree.bind("<Double-1>", self.on_tree_double_click)
+        if hasattr(self, "alter_context_menu"):
+            self.tree.bind("<Button-3>", lambda event: self.show_context_menu(event, self.tree, self.alter_context_menu))
+            self.bind_tree_shortcuts(self.tree)
+        self.tree.bind("<ButtonPress-1>", self.start_alter_drag)
+        self.tree.bind("<ButtonRelease-1>", self.finish_alter_drag)
 
         # re-insert existing rows mapping by index
         for vals in existing:
@@ -421,6 +715,12 @@ class App(tk.Tk):
                 return
             if 0 <= index < len(self.alter_columns):
                 self.rename_column_prompt(index)
+        elif region == "cell":
+            item = self.tree.identify_row(event.y)
+            if item:
+                self.tree.selection_set(item)
+                self.tree.focus(item)
+                self.open_edit_entry_popup()
 
     def on_input_focus_in(self, col):
         self.last_focused_col = col
@@ -498,6 +798,46 @@ class App(tk.Tk):
         tk.Button(buttons_frame, text="Save", command=save_popup_entry).pack(side=tk.LEFT, padx=4)
         tk.Button(buttons_frame, text="Cancel", command=popup.destroy).pack(side=tk.LEFT, padx=4)
 
+    def open_edit_front_popup(self):
+        selected = self.front_tree.selection()
+        if not selected:
+            messagebox.showwarning("Warning", "No front entry selected")
+            return
+
+        item = selected[0]
+        values = self.front_tree.item(item, "values")
+        popup = tk.Toplevel(self)
+        popup.title("Edit Front Entry")
+        popup.geometry("450x150")
+        popup.transient(self)
+        popup.grab_set()
+
+        tk.Label(popup, text="Alter Name:").grid(row=0, column=0, sticky=tk.W, padx=10, pady=8)
+        name_entry = tk.Entry(popup, width=40)
+        name_entry.insert(0, values[0] if values else "")
+        name_entry.grid(row=0, column=1, padx=10, pady=8, sticky="we")
+
+        tk.Label(popup, text="Timestamp:").grid(row=1, column=0, sticky=tk.W, padx=10, pady=8)
+        timestamp_entry = tk.Entry(popup, width=40)
+        timestamp_entry.insert(0, values[1] if len(values) > 1 else "")
+        timestamp_entry.grid(row=1, column=1, padx=10, pady=8, sticky="we")
+        popup.columnconfigure(1, weight=1)
+
+        def save_front_entry():
+            alter_name = name_entry.get().strip()
+            if not alter_name:
+                messagebox.showerror("Error", "Alter Name is required", parent=popup)
+                return
+            self.front_tree.item(item, values=(alter_name, timestamp_entry.get()))
+            self.save_entries_auto()
+            popup.destroy()
+
+        buttons_frame = tk.Frame(popup)
+        buttons_frame.grid(row=2, column=0, columnspan=2, pady=8)
+        tk.Button(buttons_frame, text="Save", command=save_front_entry).pack(side=tk.LEFT, padx=4)
+        tk.Button(buttons_frame, text="Cancel", command=popup.destroy).pack(side=tk.LEFT, padx=4)
+        name_entry.focus_set()
+
     def rename_column_prompt(self, index):
         old = self.alter_columns[index]
         new = simpledialog.askstring("Rename Column", f"Rename '{old}' to:", initialvalue=old)
@@ -518,6 +858,7 @@ class App(tk.Tk):
             self.alter_columns[index] = new.strip()
             # rebuild tree with new headings
             self.build_alters_tree(self.alter_columns)
+            self.save_entries_auto()
             # save to settings immediately
             self.save_settings()
 
@@ -610,6 +951,7 @@ class App(tk.Tk):
         def on_ok():
             # rebuild tree with new columns
             self.build_alters_tree(self.alter_columns)
+            self.save_entries_auto()
             self.save_settings()
             dlg.destroy()
 
@@ -750,24 +1092,6 @@ class App(tk.Tk):
             messagebox.showwarning("Warning", "No front entry selected")
 
     def save_entries(self):
-        alters = []
-        for item in self.tree.get_children():
-            values = self.tree.item(item, "values")
-            entry = {}
-            for i, col in enumerate(self.alter_columns):
-                entry[col] = values[i] if i < len(values) else ""
-            alters.append(entry)
-
-        front = []
-        for item in self.front_tree.get_children():
-            values = self.front_tree.item(item, "values")
-            front.append({
-                "Alter Name": values[0],
-                "Timestamp": values[1],
-            })
-
-        data = {"alters": alters, "front": front, "alter_columns": self.alter_columns}
-
         file_path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -776,12 +1100,8 @@ class App(tk.Tk):
         if not file_path:
             return
 
-        try:
-            with open(file_path, "w", encoding="utf-8") as file:
-                json.dump(data, file, indent=2, ensure_ascii=False)
+        if self.save_data_to_file(file_path, "save entries"):
             messagebox.showinfo("Saved", f"Entries saved to {file_path}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save entries:\n{e}")
 
     def load_entries(self):
         file_path = filedialog.askopenfilename(
@@ -796,17 +1116,8 @@ class App(tk.Tk):
                 data = json.load(file)
 
             normalized = self.normalize_loaded_json(data)
-            self.alter_columns = normalized["alter_columns"]
-            self.build_alters_tree(self.alter_columns)
-
-            self.tree.delete(*self.tree.get_children())
-            for entry in normalized["alters"]:
-                values = [entry.get(col, "") for col in self.alter_columns]
-                self.tree.insert("", tk.END, values=tuple(values))
-
-            self.front_tree.delete(*self.front_tree.get_children())
-            for entry in normalized["front"]:
-                self.front_tree.insert("", tk.END, values=(entry.get("Alter Name", ""), entry.get("Timestamp", "")))
+            self.apply_normalized_data(normalized)
+            self.record_history()
 
             if not (isinstance(data, dict) and "alter_columns" in data and "alters" in data and "front" in data):
                 self.save_normalized_file(file_path, normalized)
@@ -818,4 +1129,3 @@ class App(tk.Tk):
 if __name__ == "__main__":
     app = App()
     app.mainloop()
->>>>>>> ebf48ad (Clean up)
